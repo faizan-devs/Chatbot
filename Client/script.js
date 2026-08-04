@@ -36,20 +36,13 @@ const generateBotResponse = async (incomingMessageDiv) => {
 		],
 	});
 
-	// API request options
-	const requestOptions = {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			contents: chatHistory,
-		}),
-	};
-
 	try {
-		const API_URL =
-			location.hostname === 'localhost'
-				? 'http://localhost:3000/chat'
-				: 'https://chatbot-u746.onrender.com/chat';
+		const isLocal =
+			location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+		const API_URL = isLocal
+			? 'http://localhost:3000/chat'
+			: 'https://chatbot-u746.onrender.com/chat';
 
 		const response = await fetch(API_URL, {
 			method: 'POST',
@@ -83,20 +76,28 @@ const generateBotResponse = async (incomingMessageDiv) => {
 				stream: true,
 			});
 
-			console.log('Browser received:', chunk); // <-- Add this
+			const events = chunk.split('\n\n');
 
-			botReply += chunk;
+			for (const event of events) {
+				if (!event.startsWith('data: ')) continue;
 
-			messageElement.innerHTML = marked.parse(botReply);
+				const data = event.replace('data: ', '');
 
-			messageElement.querySelectorAll('pre code').forEach((block) => {
-				hljs.highlightElement(block);
-			});
+				if (data === '[DONE]') break;
 
-			chatBody.scrollTo({
-				top: chatBody.scrollHeight,
-				behavior: 'smooth',
-			});
+				botReply += JSON.parse(data);
+
+				messageElement.innerHTML = marked.parse(botReply);
+
+				messageElement.querySelectorAll('pre code').forEach((block) => {
+					hljs.highlightElement(block);
+				});
+
+				chatBody.scrollTo({
+					top: chatBody.scrollHeight,
+					behavior: 'smooth',
+				});
+			}
 		}
 
 		// Save assistant response
