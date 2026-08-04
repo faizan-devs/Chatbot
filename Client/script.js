@@ -46,7 +46,12 @@ const generateBotResponse = async (incomingMessageDiv) => {
 	};
 
 	try {
-		const response = await fetch('http://localhost:3000/chat', {
+		const API_URL =
+			location.hostname === 'localhost'
+				? 'http://localhost:3000/chat'
+				: 'https://chatbot-u746.onrender.com';
+
+		const response = await fetch(API_URL, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
