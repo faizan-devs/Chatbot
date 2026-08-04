@@ -83,6 +83,8 @@ const generateBotResponse = async (incomingMessageDiv) => {
 				stream: true,
 			});
 
+			console.log('Browser received:', chunk); // <-- Add this
+
 			botReply += chunk;
 
 			messageElement.innerHTML = marked.parse(botReply);
