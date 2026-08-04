@@ -7,15 +7,18 @@ dotenv.config();
 
 const app = express();
 
-app.use(
-	cors({
-		origin: [
-			'http://localhost:5500',
-			'http://127.0.0.1:5500',
-			'https://geminiapichatbot.netlify.app',
-		],
-	}),
-);
+const allowedOrigins = ['https://geminiapichatbot.netlify.app'];
+
+if (process.env.NODE_ENV !== 'production') {
+	app.use(cors());
+} else {
+	app.use(
+		cors({
+			origin: allowedOrigins,
+		}),
+	);
+}
+
 app.use(express.json());
 
 const client = new OpenAI({
@@ -41,21 +44,19 @@ app.post('/chat', async (req, res) => {
 			stream: true,
 		});
 
-		res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+		res.setHeader('Content-Type', 'text/event-stream');
+		res.setHeader('Cache-Control', 'no-cache');
+		res.setHeader('Connection', 'keep-alive');
 
-		// Flush headers immediately
 		res.flushHeaders();
 
 		for await (const event of stream) {
 			if (event.type === 'response.output_text.delta') {
-				console.log('Chunk:', event.delta); // <-- Add this
-
-				res.write(event.delta);
+				res.write(`data: ${JSON.stringify(event.delta)}\n\n`);
 			}
 		}
 
-		console.log('Stream finished'); // <-- Add this
-
+		res.write('data: [DONE]\n\n');
 		res.end();
 	} catch (err) {
 		console.error(err);
