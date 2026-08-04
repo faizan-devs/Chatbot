@@ -42,13 +42,19 @@ app.post('/chat', async (req, res) => {
 		});
 
 		res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-		res.setHeader('Transfer-Encoding', 'chunked');
+
+		// Flush headers immediately
+		res.flushHeaders();
 
 		for await (const event of stream) {
 			if (event.type === 'response.output_text.delta') {
+				console.log('Chunk:', event.delta); // <-- Add this
+
 				res.write(event.delta);
 			}
 		}
+
+		console.log('Stream finished'); // <-- Add this
 
 		res.end();
 	} catch (err) {
