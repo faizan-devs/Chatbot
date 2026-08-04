@@ -7,7 +7,15 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors());
+app.use(
+	cors({
+		origin: [
+			'http://localhost:5500',
+			'http://127.0.0.1:5500',
+			'https://geminiapichatbot.netlify.app/',
+		],
+	}),
+);
 app.use(express.json());
 
 const client = new OpenAI({
