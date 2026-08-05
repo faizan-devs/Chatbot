@@ -13,4 +13,4 @@
 
 #### Preview Chatbot
 
-Gemini Chatbot [Click](https://geminiapichatbot.netlify.app/ 'chatbot')
+Gemini Chatbot [Click](https://aliceachatbot.netlify.app/ 'chatbot')
