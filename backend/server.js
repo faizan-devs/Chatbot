@@ -7,16 +7,19 @@ dotenv.config();
 
 const app = express();
 
-const allowedOrigins = ['https://geminiapichatbot.netlify.app'];
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+	?.split(',')
+	.map((origin) => origin.trim())
+	.filter(Boolean);
 
-if (process.env.NODE_ENV !== 'production') {
-	app.use(cors());
-} else {
+if (process.env.NODE_ENV === 'production' && allowedOrigins?.length) {
 	app.use(
 		cors({
 			origin: allowedOrigins,
 		}),
 	);
+} else {
+	app.use(cors());
 }
 
 app.use(express.json());
@@ -29,7 +32,10 @@ app.post('/chat', async (req, res) => {
 	try {
 		const { contents } = req.body;
 
-		const input = contents
+		const styleGuide =
+			'You are Alice, a simple ChatGPT-style assistant. Answer in clean, readable paragraphs. Use bullet points only when they make the answer easier to scan or when the user asks for a list. Keep headings rare, short, and natural. Avoid long bullet-heavy formatting.';
+
+		const conversation = contents
 			.map((msg) =>
 				msg.parts
 					.filter((part) => part.text)
@@ -37,6 +43,8 @@ app.post('/chat', async (req, res) => {
 					.join('\n'),
 			)
 			.join('\n');
+
+		const input = `${styleGuide}\n\nConversation:\n${conversation}`;
 
 		const stream = await client.responses.create({
 			model: 'gpt-5-mini',
