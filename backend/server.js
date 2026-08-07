@@ -7,8 +7,7 @@ dotenv.config();
 
 const app = express();
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-	?.split(',')
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',')
 	.map((origin) => origin.trim())
 	.filter(Boolean);
 
@@ -71,6 +70,14 @@ app.post('/chat', async (req, res) => {
 
 		res.status(500).end(err.message);
 	}
+});
+
+app.get('/health', (req, res) => {
+	console.log('Health check:', new Date().toISOString());
+
+	res.json({
+		status: 'OK',
+	});
 });
 
 app.listen(3000, () => {
