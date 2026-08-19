@@ -2,10 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import crypto from 'node:crypto';
 
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',')
 	.map((origin) => origin.trim())
@@ -21,7 +23,7 @@ if (process.env.NODE_ENV === 'production' && allowedOrigins?.length) {
 	app.use(cors());
 }
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const client = new OpenAI({
 	apiKey: process.env.OPENAI_API_KEY,
@@ -30,32 +32,50 @@ const client = new OpenAI({
 const DAILY_MESSAGE_LIMIT = 5;
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const rateLimitStore = new Map();
+const sessionStore = new Map();
 
-const getDeviceKey = (req) =>
-	req.get('x-device-id') ||
+const getClientKey = (req) =>
 	req.ip ||
 	req.socket.remoteAddress ||
 	'unknown-device';
 
-const getRateLimitRecord = (deviceKey) => {
+const getRateLimitRecord = (clientKey) => {
 	const now = Date.now();
-	const existingRecord = rateLimitStore.get(deviceKey);
+	const existingRecord = rateLimitStore.get(clientKey);
 
 	if (!existingRecord || now >= existingRecord.resetAt) {
 		const record = {
 			count: 0,
 			resetAt: now + RATE_LIMIT_WINDOW_MS,
 		};
-		rateLimitStore.set(deviceKey, record);
+		rateLimitStore.set(clientKey, record);
 		return record;
 	}
 
 	return existingRecord;
 };
 
+const hasConversation = (session) =>
+	Array.isArray(session.messages) &&
+	session.messages.some((message) => message.role === 'user');
+
+const sanitizeSessions = (sessions) => {
+	if (!Array.isArray(sessions)) return [];
+
+	return sessions
+		.filter(hasConversation)
+		.map((session) => ({
+			id: String(session.id || crypto.randomUUID()),
+			title: String(session.title || 'New chat').slice(0, 80),
+			messages: session.messages,
+			createdAt: Number(session.createdAt) || Date.now(),
+			updatedAt: Number(session.updatedAt) || Date.now(),
+		}));
+};
+
 const rateLimitChat = (req, res, next) => {
-	const deviceKey = getDeviceKey(req);
-	const record = getRateLimitRecord(deviceKey);
+	const clientKey = getClientKey(req);
+	const record = getRateLimitRecord(clientKey);
 
 	if (record.count >= DAILY_MESSAGE_LIMIT) {
 		return res.status(429).json({
@@ -68,6 +88,32 @@ const rateLimitChat = (req, res, next) => {
 	record.count += 1;
 	next();
 };
+
+app.get('/limit-status', (req, res) => {
+	const record = getRateLimitRecord(getClientKey(req));
+
+	res.json({
+		limit: DAILY_MESSAGE_LIMIT,
+		remaining: Math.max(DAILY_MESSAGE_LIMIT - record.count, 0),
+		retryAt: new Date(record.resetAt).toISOString(),
+	});
+});
+
+app.get('/sessions', (req, res) => {
+	const clientKey = getClientKey(req);
+
+	res.json({
+		sessions: sessionStore.get(clientKey) || [],
+	});
+});
+
+app.put('/sessions', (req, res) => {
+	const clientKey = getClientKey(req);
+	const sessions = sanitizeSessions(req.body.sessions);
+
+	sessionStore.set(clientKey, sessions);
+	res.json({ ok: true });
+});
 
 app.post('/chat', rateLimitChat, async (req, res) => {
 	try {
