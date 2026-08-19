@@ -6,6 +6,10 @@ const fileCancelButton = document.querySelector('#file-cancel');
 const clearChatButton = document.querySelector('#clear-chat');
 const newChatButton = document.querySelector('#new-chat');
 const chatForm = document.querySelector('.chat-form');
+const conversationList = document.querySelector('#conversation-list');
+
+const STORAGE_KEY = 'alice-chat-sessions';
+const ACTIVE_SESSION_KEY = 'alice-active-session-id';
 
 const botAvatar = `<svg class="bot-avatar" xmlns="http://www.w3.org/2000/svg" width="50" height="50"
 	viewBox="0 0 1024 1024" aria-hidden="true">
@@ -28,7 +32,8 @@ const userData = {
 	},
 };
 
-const chatHistory = [];
+let sessions = [];
+let activeSessionId = null;
 
 const createMessageElement = (content, ...classes) => {
 	const div = document.createElement('div');
@@ -36,6 +41,92 @@ const createMessageElement = (content, ...classes) => {
 	div.innerHTML = content;
 	return div;
 };
+
+const createSessionId = () => {
+	if (window.crypto?.randomUUID) {
+		return window.crypto.randomUUID();
+	}
+
+	return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const createEmptySession = () => ({
+	id: createSessionId(),
+	title: 'New chat',
+	messages: [],
+	createdAt: Date.now(),
+	updatedAt: Date.now(),
+});
+
+const getActiveSession = () =>
+	sessions.find((session) => session.id === activeSessionId);
+
+const saveSessions = () => {
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+	localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+};
+
+const loadSessions = () => {
+	try {
+		const savedSessions = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+		if (Array.isArray(savedSessions) && savedSessions.length) {
+			sessions = savedSessions.map((session) => ({
+				...createEmptySession(),
+				...session,
+				messages: Array.isArray(session.messages) ? session.messages : [],
+			}));
+		} else {
+			sessions = [createEmptySession()];
+		}
+	} catch {
+		sessions = [createEmptySession()];
+	}
+
+	const savedActiveSessionId = localStorage.getItem(ACTIVE_SESSION_KEY);
+	activeSessionId =
+		sessions.find((session) => session.id === savedActiveSessionId)?.id ??
+		sessions[0].id;
+	saveSessions();
+};
+
+const getSessionTitle = (text) => {
+	const compactText = text.replace(/\s+/g, ' ').trim();
+	return compactText.length > 36
+		? `${compactText.slice(0, 36).trim()}...`
+		: compactText || 'New chat';
+};
+
+const renderConversationList = () => {
+	conversationList.innerHTML = '';
+
+	[...sessions]
+		.sort((a, b) => b.updatedAt - a.updatedAt)
+		.forEach((session) => {
+			const button = document.createElement('button');
+			const icon = document.createElement('span');
+			const title = document.createElement('span');
+
+			button.type = 'button';
+			button.classList.toggle('active', session.id === activeSessionId);
+			button.dataset.sessionId = session.id;
+			icon.className = 'material-symbols-rounded';
+			icon.setAttribute('aria-hidden', 'true');
+			icon.textContent = 'forum';
+			title.textContent = session.title;
+			button.append(icon, title);
+			conversationList.appendChild(button);
+		});
+};
+
+const toApiHistory = (messages) =>
+	messages.map((message) => ({
+		role: message.role,
+		parts: [
+			{ text: message.text },
+			...(message.file?.data ? [{ inline_data: message.file }] : []),
+		],
+	}));
 
 const scrollChatToBottom = () => {
 	chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: 'smooth' });
@@ -67,13 +158,64 @@ const renderAssistantReply = (messageElement, reply) => {
 	}
 };
 
-const resetChat = () => {
-	chatHistory.length = 0;
-	resetFileUpload();
+const renderChat = () => {
+	const activeSession = getActiveSession();
 	chatBody.innerHTML = '';
 	chatBody.appendChild(createMessageElement(initialBotMessage, 'bot-message'));
+
+	activeSession.messages.forEach((message) => {
+		if (message.role === 'user') {
+			const messageContent = `<div class="message-text"></div>
+				${message.file?.data ? `<img src="data:${message.file.mime_type};base64,${message.file.data}" class="attachment" alt="Uploaded image" />` : ''}`;
+			const messageDiv = createMessageElement(messageContent, 'user-message');
+			messageDiv.querySelector('.message-text').textContent = message.text;
+			chatBody.appendChild(messageDiv);
+			return;
+		}
+
+		const messageDiv = createMessageElement(
+			`${botAvatar}<div class="message-text"></div>`,
+			'bot-message',
+		);
+		renderAssistantReply(messageDiv.querySelector('.message-text'), message.text);
+		chatBody.appendChild(messageDiv);
+	});
+
+	scrollChatToBottom();
+};
+
+const resetChat = () => {
+	const activeSession = getActiveSession();
+	activeSession.messages = [];
+	activeSession.title = 'New chat';
+	activeSession.updatedAt = Date.now();
+	resetFileUpload();
 	messageInput.value = '';
 	resetTextareaHeight();
+	saveSessions();
+	renderConversationList();
+	renderChat();
+	messageInput.focus();
+};
+
+const startNewChat = () => {
+	const activeSession = getActiveSession();
+
+	if (activeSession.messages.length) {
+		const nextSession = createEmptySession();
+		sessions.unshift(nextSession);
+		activeSessionId = nextSession.id;
+	} else {
+		activeSession.title = 'New chat';
+		activeSession.updatedAt = Date.now();
+	}
+
+	resetFileUpload();
+	messageInput.value = '';
+	resetTextareaHeight();
+	saveSessions();
+	renderConversationList();
+	renderChat();
 	messageInput.focus();
 };
 
@@ -86,16 +228,9 @@ const getApiUrl = () => {
 		: 'https://chatbot-u746.onrender.com/chat';
 };
 
-const generateBotResponse = async (incomingMessageDiv) => {
+const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 	const messageElement = incomingMessageDiv.querySelector('.message-text');
-
-	chatHistory.push({
-		role: 'user',
-		parts: [
-			{ text: userData.message },
-			...(userData.file.data ? [{ inline_data: userData.file }] : []),
-		],
-	});
+	const session = sessions.find((item) => item.id === sessionId);
 
 	try {
 		const response = await fetch(getApiUrl(), {
@@ -104,7 +239,7 @@ const generateBotResponse = async (incomingMessageDiv) => {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify({
-				contents: chatHistory,
+				contents: toApiHistory(session.messages),
 			}),
 		});
 
@@ -148,14 +283,18 @@ const generateBotResponse = async (incomingMessageDiv) => {
 			}
 		}
 
-		chatHistory.push({
+		session.messages.push({
 			role: 'assistant',
-			parts: [
-				{
-					text: botReply,
-				},
-			],
+			text: botReply,
+			createdAt: Date.now(),
 		});
+		session.updatedAt = Date.now();
+		saveSessions();
+		renderConversationList();
+
+		if (activeSessionId === sessionId && !chatBody.contains(incomingMessageDiv)) {
+			renderChat();
+		}
 	} catch (error) {
 		console.error(error);
 		messageElement.textContent = error.message;
@@ -172,6 +311,9 @@ const handleOutgoingMessage = (e) => {
 	userData.message = messageInput.value.trim();
 	if (!userData.message) return;
 
+	const activeSession = getActiveSession();
+	const outgoingFile = userData.file.data ? { ...userData.file } : null;
+
 	messageInput.value = '';
 	resetTextareaHeight();
 	fileUploadWrapper.classList.remove('file-uploaded');
@@ -187,6 +329,21 @@ const handleOutgoingMessage = (e) => {
 		userData.message;
 	chatBody.appendChild(outgoingMessageDiv);
 	scrollChatToBottom();
+
+	activeSession.messages.push({
+		role: 'user',
+		text: userData.message,
+		file: outgoingFile,
+		createdAt: Date.now(),
+	});
+
+	if (activeSession.title === 'New chat') {
+		activeSession.title = getSessionTitle(userData.message);
+	}
+
+	activeSession.updatedAt = Date.now();
+	saveSessions();
+	renderConversationList();
 
 	setTimeout(() => {
 		const messageContent = `${botAvatar}
@@ -205,7 +362,7 @@ const handleOutgoingMessage = (e) => {
 		);
 		chatBody.appendChild(incomingMessageDiv);
 		scrollChatToBottom();
-		generateBotResponse(incomingMessageDiv);
+		generateBotResponse(incomingMessageDiv, activeSession.id);
 	}, 500);
 };
 
@@ -265,7 +422,24 @@ if (window.EmojiMart) {
 
 chatForm.addEventListener('submit', handleOutgoingMessage);
 clearChatButton.addEventListener('click', resetChat);
-newChatButton?.addEventListener('click', resetChat);
+newChatButton?.addEventListener('click', startNewChat);
+conversationList.addEventListener('click', (e) => {
+	const button = e.target.closest('button[data-session-id]');
+	if (!button) return;
+
+	activeSessionId = button.dataset.sessionId;
+	resetFileUpload();
+	messageInput.value = '';
+	resetTextareaHeight();
+	saveSessions();
+	renderConversationList();
+	renderChat();
+	messageInput.focus();
+});
 document
 	.querySelector('#file-upload')
 	.addEventListener('click', () => fileInput.click());
+
+loadSessions();
+renderConversationList();
+renderChat();
