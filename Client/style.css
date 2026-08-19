@@ -314,20 +314,6 @@ button {
 	background: var(--brand);
 }
 
-.chat-header #clear-chat {
-	width: 40px;
-	height: 40px;
-	color: var(--ink-muted);
-	border-radius: 50%;
-	background: transparent;
-	transition: background 0.18s ease, color 0.18s ease;
-}
-
-.chat-header #clear-chat:hover {
-	color: var(--ink);
-	background: var(--panel-muted);
-}
-
 .chat-body {
 	display: flex;
 	flex-direction: column;
