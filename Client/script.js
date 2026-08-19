@@ -7,10 +7,17 @@ const newChatButton = document.querySelector('#new-chat');
 const chatForm = document.querySelector('.chat-form');
 const conversationList = document.querySelector('#conversation-list');
 const scrollToBottomButton = document.querySelector('#scroll-to-bottom');
+const limitPopup = document.querySelector('#limit-popup');
+const limitPopupMessage = document.querySelector('#limit-popup-message');
+const limitPopupClose = document.querySelector('#limit-popup-close');
 
 const STORAGE_KEY = 'alice-chat-sessions';
 const ACTIVE_SESSION_KEY = 'alice-active-session-id';
+const DEVICE_ID_KEY = 'alice-device-id';
+const RATE_LIMIT_KEY = 'alice-rate-limit';
 const BOTTOM_THRESHOLD = 80;
+const DAILY_MESSAGE_LIMIT = 5;
+const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const botAvatar = `<svg class="bot-avatar" xmlns="http://www.w3.org/2000/svg" width="50" height="50"
 	viewBox="0 0 1024 1024" aria-hidden="true">
@@ -50,6 +57,17 @@ const createSessionId = () => {
 	}
 
 	return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const getDeviceId = () => {
+	let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+
+	if (!deviceId) {
+		deviceId = createSessionId();
+		localStorage.setItem(DEVICE_ID_KEY, deviceId);
+	}
+
+	return deviceId;
 };
 
 const createEmptySession = () => ({
@@ -202,6 +220,62 @@ const scrollChatToBottom = (behavior = 'smooth') => {
 	requestAnimationFrame(updateScrollToBottomButton);
 };
 
+const formatUnlockTime = (timestamp) =>
+	new Intl.DateTimeFormat(undefined, {
+		dateStyle: 'medium',
+		timeStyle: 'short',
+	}).format(new Date(timestamp));
+
+const showLimitPopup = (retryAt) => {
+	limitPopupMessage.textContent = `Limit exceeded. Try again after ${formatUnlockTime(
+		retryAt,
+	)}.`;
+	limitPopup.classList.add('visible');
+};
+
+const getRateLimit = () => {
+	const now = Date.now();
+	let rateLimit = null;
+
+	try {
+		rateLimit = JSON.parse(localStorage.getItem(RATE_LIMIT_KEY));
+	} catch {
+		rateLimit = null;
+	}
+
+	const hasValidLimit =
+		rateLimit &&
+		Number.isFinite(rateLimit.count) &&
+		Number.isFinite(rateLimit.resetAt);
+
+	if (!hasValidLimit || now >= rateLimit.resetAt) {
+		rateLimit = {
+			count: 0,
+			resetAt: now + RATE_LIMIT_WINDOW_MS,
+		};
+		localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(rateLimit));
+	}
+
+	return rateLimit;
+};
+
+const canSendMessage = () => {
+	const rateLimit = getRateLimit();
+
+	if (rateLimit.count >= DAILY_MESSAGE_LIMIT) {
+		showLimitPopup(rateLimit.resetAt);
+		return false;
+	}
+
+	return true;
+};
+
+const recordMessageUse = () => {
+	const rateLimit = getRateLimit();
+	rateLimit.count += 1;
+	localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(rateLimit));
+};
+
 const resetFileUpload = () => {
 	userData.file = {};
 	fileUploadWrapper.classList.remove('file-uploaded');
@@ -317,11 +391,23 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
+				'X-Device-Id': getDeviceId(),
 			},
 			body: JSON.stringify({
 				contents: toApiHistory(session.messages),
 			}),
 		});
+
+		if (response.status === 429) {
+			const limitData = await response.json();
+			const retryAt = Date.parse(limitData.retryAt);
+			showLimitPopup(
+				Number.isNaN(retryAt)
+					? Date.now() + RATE_LIMIT_WINDOW_MS
+					: retryAt,
+			);
+			throw new Error(limitData.message || 'Daily chat limit reached.');
+		}
 
 		if (!response.ok || !response.body) {
 			throw new Error('The assistant could not respond. Please try again.');
@@ -396,6 +482,9 @@ const handleOutgoingMessage = (e) => {
 
 	userData.message = messageInput.value.trim();
 	if (!userData.message) return;
+	if (!canSendMessage()) return;
+
+	recordMessageUse();
 
 	const activeSession = getActiveSession();
 	const outgoingFile = userData.file.data ? { ...userData.file } : null;
@@ -482,6 +571,16 @@ fileInput.addEventListener('change', () => {
 });
 
 fileCancelButton.addEventListener('click', resetFileUpload);
+limitPopupClose.addEventListener('click', () => {
+	limitPopup.classList.remove('visible');
+	messageInput.focus();
+});
+limitPopup.addEventListener('click', (e) => {
+	if (e.target === limitPopup) {
+		limitPopup.classList.remove('visible');
+		messageInput.focus();
+	}
+});
 
 if (window.EmojiMart) {
 	const picker = new EmojiMart.Picker({
