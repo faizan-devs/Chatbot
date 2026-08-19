@@ -13,11 +13,9 @@ const limitPopupClose = document.querySelector('#limit-popup-close');
 
 const STORAGE_KEY = 'alice-chat-sessions';
 const ACTIVE_SESSION_KEY = 'alice-active-session-id';
-const DEVICE_ID_KEY = 'alice-device-id';
-const RATE_LIMIT_KEY = 'alice-rate-limit';
 const BOTTOM_THRESHOLD = 80;
-const DAILY_MESSAGE_LIMIT = 5;
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SERVER_SYNC_DEBOUNCE_MS = 250;
 
 const botAvatar = `<svg class="bot-avatar" xmlns="http://www.w3.org/2000/svg" width="50" height="50"
 	viewBox="0 0 1024 1024" aria-hidden="true">
@@ -43,6 +41,8 @@ const userData = {
 let sessions = [];
 let activeSessionId = null;
 let openMenuSessionId = null;
+let isGenerating = false;
+let syncTimer = null;
 
 const createMessageElement = (content, ...classes) => {
 	const div = document.createElement('div');
@@ -59,17 +59,6 @@ const createSessionId = () => {
 	return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-const getDeviceId = () => {
-	let deviceId = localStorage.getItem(DEVICE_ID_KEY);
-
-	if (!deviceId) {
-		deviceId = createSessionId();
-		localStorage.setItem(DEVICE_ID_KEY, deviceId);
-	}
-
-	return deviceId;
-};
-
 const createEmptySession = () => ({
 	id: createSessionId(),
 	title: 'New chat',
@@ -84,7 +73,37 @@ const getActiveSession = () =>
 const hasConversation = (session) =>
 	session.messages.some((message) => message.role === 'user');
 
-const saveSessions = () => {
+const getApiBaseUrl = () => {
+	const isLocal =
+		location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+	return isLocal ? 'http://localhost:3000' : 'https://chatbot-u746.onrender.com';
+};
+
+const syncSessionsToServer = async (savedSessions) => {
+	try {
+		await fetch(`${getApiBaseUrl()}/sessions`, {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				sessions: savedSessions,
+			}),
+		});
+	} catch (error) {
+		console.warn('Could not sync chat history to server.', error);
+	}
+};
+
+const queueServerSessionSync = (savedSessions) => {
+	clearTimeout(syncTimer);
+	syncTimer = setTimeout(() => {
+		syncSessionsToServer(savedSessions);
+	}, SERVER_SYNC_DEBOUNCE_MS);
+};
+
+const saveSessions = ({ syncServer = true } = {}) => {
 	const savedSessions = sessions.filter(hasConversation);
 	const activeSession = getActiveSession();
 
@@ -94,6 +113,10 @@ const saveSessions = () => {
 		localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
 	} else {
 		localStorage.removeItem(ACTIVE_SESSION_KEY);
+	}
+
+	if (syncServer) {
+		queueServerSessionSync(savedSessions);
 	}
 };
 
@@ -124,7 +147,81 @@ const loadSessions = () => {
 		? savedSessions
 		: [draftSession, ...savedSessions];
 	activeSessionId = savedActiveSession?.id ?? draftSession.id;
-	saveSessions();
+	saveSessions({ syncServer: false });
+};
+
+const normalizeSession = (session) => ({
+	...createEmptySession(),
+	...session,
+	messages: Array.isArray(session.messages) ? session.messages : [],
+});
+
+const getConversationSnapshot = (conversationSessions) =>
+	JSON.stringify(
+		[...conversationSessions].sort((a, b) => b.updatedAt - a.updatedAt),
+	);
+
+const syncSessionsFromServer = async () => {
+	if (isGenerating) return;
+
+	try {
+		const response = await fetch(`${getApiBaseUrl()}/sessions`);
+		if (!response.ok) return;
+
+		const data = await response.json();
+		if (!Array.isArray(data.sessions)) return;
+
+		const previousActiveSessionId = activeSessionId;
+		const previousSnapshot = getConversationSnapshot(
+			sessions.filter(hasConversation),
+		);
+		const remoteSessions = data.sessions
+			.map(normalizeSession)
+			.filter(hasConversation)
+			.sort((a, b) => b.updatedAt - a.updatedAt);
+		const remoteSnapshot = getConversationSnapshot(remoteSessions);
+		const mergedSessions = new Map();
+
+		remoteSessions.forEach((session) => {
+			mergedSessions.set(session.id, session);
+		});
+
+		sessions.filter(hasConversation).forEach((session) => {
+			const existingSession = mergedSessions.get(session.id);
+
+			if (
+				!existingSession ||
+				Number(session.updatedAt) > Number(existingSession.updatedAt)
+			) {
+				mergedSessions.set(session.id, session);
+			}
+		});
+
+		const savedSessions = [...mergedSessions.values()]
+			.filter(hasConversation)
+			.sort((a, b) => b.updatedAt - a.updatedAt);
+		const activeSession = savedSessions.find(
+			(session) => session.id === activeSessionId,
+		);
+		const draftSession = createEmptySession();
+		const nextSnapshot = getConversationSnapshot(savedSessions);
+
+		sessions = activeSession ? savedSessions : [draftSession, ...savedSessions];
+		activeSessionId = activeSession?.id ?? draftSession.id;
+		saveSessions({
+			syncServer: savedSessions.length > 0 && remoteSnapshot !== nextSnapshot,
+		});
+
+		if (
+			previousActiveSessionId !== activeSessionId ||
+			previousSnapshot !== nextSnapshot
+		) {
+			renderConversationList();
+			renderChat();
+		}
+	} catch (error) {
+		console.warn('Could not sync chat history from server.', error);
+	}
 };
 
 const getSessionTitle = (text) => {
@@ -233,47 +330,38 @@ const showLimitPopup = (retryAt) => {
 	limitPopup.classList.add('visible');
 };
 
-const getRateLimit = () => {
-	const now = Date.now();
-	let rateLimit = null;
-
+const checkServerRateLimit = async () => {
 	try {
-		rateLimit = JSON.parse(localStorage.getItem(RATE_LIMIT_KEY));
-	} catch {
-		rateLimit = null;
-	}
+		const response = await fetch(`${getApiBaseUrl()}/limit-status`);
+		if (!response.ok) return true;
 
-	const hasValidLimit =
-		rateLimit &&
-		Number.isFinite(rateLimit.count) &&
-		Number.isFinite(rateLimit.resetAt);
+		const data = await response.json();
+		const retryAt = Date.parse(data.retryAt);
 
-	if (!hasValidLimit || now >= rateLimit.resetAt) {
-		rateLimit = {
-			count: 0,
-			resetAt: now + RATE_LIMIT_WINDOW_MS,
-		};
-		localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(rateLimit));
-	}
-
-	return rateLimit;
-};
-
-const canSendMessage = () => {
-	const rateLimit = getRateLimit();
-
-	if (rateLimit.count >= DAILY_MESSAGE_LIMIT) {
-		showLimitPopup(rateLimit.resetAt);
-		return false;
+		if (data.remaining <= 0) {
+			showLimitPopup(
+				Number.isNaN(retryAt)
+					? Date.now() + RATE_LIMIT_WINDOW_MS
+					: retryAt,
+			);
+			return false;
+		}
+	} catch (error) {
+		console.warn('Could not check rate limit before sending.', error);
 	}
 
 	return true;
 };
 
-const recordMessageUse = () => {
-	const rateLimit = getRateLimit();
-	rateLimit.count += 1;
-	localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(rateLimit));
+const setComposerDisabled = (disabled) => {
+	isGenerating = disabled;
+	messageInput.disabled = disabled;
+	fileInput.disabled = disabled;
+	chatForm.classList.toggle('is-disabled', disabled);
+
+	chatForm.querySelectorAll('button').forEach((button) => {
+		button.disabled = disabled;
+	});
 };
 
 const resetFileUpload = () => {
@@ -374,12 +462,7 @@ const deleteSession = (sessionId) => {
 };
 
 const getApiUrl = () => {
-	const isLocal =
-		location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-
-	return isLocal
-		? 'http://localhost:3000/chat'
-		: 'https://chatbot-u746.onrender.com/chat';
+	return `${getApiBaseUrl()}/chat`;
 };
 
 const generateBotResponse = async (incomingMessageDiv, sessionId) => {
@@ -391,7 +474,6 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
-				'X-Device-Id': getDeviceId(),
 			},
 			body: JSON.stringify({
 				contents: toApiHistory(session.messages),
@@ -473,18 +555,24 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 		messageElement.style.color = '#dc2626';
 	} finally {
 		resetFileUpload();
+		setComposerDisabled(false);
 		updateScrollToBottomButton();
 	}
 };
 
-const handleOutgoingMessage = (e) => {
+const handleOutgoingMessage = async (e) => {
 	e.preventDefault();
 
 	userData.message = messageInput.value.trim();
 	if (!userData.message) return;
-	if (!canSendMessage()) return;
+	if (isGenerating) return;
 
-	recordMessageUse();
+	setComposerDisabled(true);
+	const canSend = await checkServerRateLimit();
+	if (!canSend) {
+		setComposerDisabled(false);
+		return;
+	}
 
 	const activeSession = getActiveSession();
 	const outgoingFile = userData.file.data ? { ...userData.file } : null;
@@ -650,3 +738,13 @@ document
 loadSessions();
 renderConversationList();
 renderChat();
+syncSessionsFromServer();
+window.addEventListener('focus', syncSessionsFromServer);
+window.addEventListener('storage', (e) => {
+	if (e.key === STORAGE_KEY || e.key === ACTIVE_SESSION_KEY) {
+		loadSessions();
+		renderConversationList();
+		renderChat();
+	}
+});
+setInterval(syncSessionsFromServer, 5000);
