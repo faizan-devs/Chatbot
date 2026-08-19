@@ -78,7 +78,8 @@ button {
 .brand-lockup,
 .chat-header .header-info,
 .system-status,
-.conversation-list button,
+.conversation-button,
+.conversation-menu-button,
 .new-chat-button {
 	display: flex;
 	align-items: center;
@@ -150,11 +151,20 @@ button {
 	scrollbar-color: var(--line-strong) transparent;
 }
 
-.conversation-list button {
+.conversation-item {
+	position: relative;
+	display: flex;
+	align-items: center;
+	width: 100%;
+	border-radius: 8px;
+}
+
+.conversation-button {
 	gap: 10px;
 	width: 100%;
 	min-height: 44px;
-	padding: 8px 12px;
+	min-width: 0;
+	padding: 8px 42px 8px 12px;
 	color: var(--ink-muted);
 	border-radius: 8px;
 	background: transparent;
@@ -162,17 +172,80 @@ button {
 	transition: background 0.18s ease, color 0.18s ease;
 }
 
-.conversation-list button span:last-child {
+.conversation-button span:last-child {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.conversation-list button:hover,
-.conversation-list button.active {
+.conversation-item:hover .conversation-button,
+.conversation-button.active {
 	color: var(--brand-strong);
 	background: var(--brand-soft);
+}
+
+.conversation-menu-button {
+	position: absolute;
+	right: 6px;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	color: var(--ink-muted);
+	border-radius: 7px;
+	background: transparent;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.conversation-item:hover .conversation-menu-button,
+.conversation-item.menu-open .conversation-menu-button,
+.conversation-menu-button:focus-visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.conversation-menu-button:hover,
+.conversation-item.menu-open .conversation-menu-button {
+	color: var(--ink);
+	background: rgba(248, 250, 252, 0.08);
+}
+
+.conversation-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 4px;
+	z-index: 5;
+	display: none;
+	min-width: 144px;
+	padding: 6px;
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	background: #111419;
+	box-shadow: 0 16px 42px rgba(0, 0, 0, 0.4);
+}
+
+.conversation-item.menu-open .conversation-menu {
+	display: block;
+}
+
+.delete-chat-button {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 36px;
+	padding: 0 10px;
+	color: var(--danger);
+	border-radius: 6px;
+	background: transparent;
+	text-align: left;
+	transition: background 0.18s ease;
+}
+
+.delete-chat-button:hover {
+	background: rgba(248, 113, 113, 0.12);
 }
 
 .system-status {
@@ -264,6 +337,36 @@ button {
 	overflow-y: auto;
 	scrollbar-width: thin;
 	scrollbar-color: var(--line-strong) transparent;
+}
+
+.scroll-to-bottom {
+	position: absolute;
+	left: 50%;
+	bottom: 104px;
+	z-index: 4;
+	display: grid;
+	place-items: center;
+	width: 38px;
+	height: 38px;
+	color: var(--ink);
+	border: 1px solid var(--line-strong);
+	border-radius: 50%;
+	background: #111419;
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+	opacity: 0;
+	pointer-events: none;
+	transform: translate(-50%, 8px);
+	transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.scroll-to-bottom.visible {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translate(-50%, 0);
+}
+
+.scroll-to-bottom:hover {
+	background: var(--panel-muted);
 }
 
 .chat-body .message {
@@ -624,6 +727,10 @@ body.show-emoji-picker em-emoji-picker {
 
 	.chat-footer {
 		padding: 12px 12px 14px;
+	}
+
+	.scroll-to-bottom {
+		bottom: 84px;
 	}
 
 	em-emoji-picker {
