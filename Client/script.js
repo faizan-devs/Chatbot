@@ -7,9 +7,11 @@ const clearChatButton = document.querySelector('#clear-chat');
 const newChatButton = document.querySelector('#new-chat');
 const chatForm = document.querySelector('.chat-form');
 const conversationList = document.querySelector('#conversation-list');
+const scrollToBottomButton = document.querySelector('#scroll-to-bottom');
 
 const STORAGE_KEY = 'alice-chat-sessions';
 const ACTIVE_SESSION_KEY = 'alice-active-session-id';
+const BOTTOM_THRESHOLD = 80;
 
 const botAvatar = `<svg class="bot-avatar" xmlns="http://www.w3.org/2000/svg" width="50" height="50"
 	viewBox="0 0 1024 1024" aria-hidden="true">
@@ -34,6 +36,7 @@ const userData = {
 
 let sessions = [];
 let activeSessionId = null;
+let openMenuSessionId = null;
 
 const createMessageElement = (content, ...classes) => {
 	const div = document.createElement('div');
@@ -103,19 +106,56 @@ const renderConversationList = () => {
 	[...sessions]
 		.sort((a, b) => b.updatedAt - a.updatedAt)
 		.forEach((session) => {
+			const item = document.createElement('div');
 			const button = document.createElement('button');
 			const icon = document.createElement('span');
 			const title = document.createElement('span');
+			const menuButton = document.createElement('button');
+			const menu = document.createElement('div');
+			const deleteButton = document.createElement('button');
+			const deleteIcon = document.createElement('span');
+			const deleteText = document.createElement('span');
 
+			item.className = 'conversation-item';
+			item.classList.toggle('menu-open', session.id === openMenuSessionId);
+			item.dataset.sessionId = session.id;
 			button.type = 'button';
+			button.className = 'conversation-button';
 			button.classList.toggle('active', session.id === activeSessionId);
 			button.dataset.sessionId = session.id;
 			icon.className = 'material-symbols-rounded';
 			icon.setAttribute('aria-hidden', 'true');
 			icon.textContent = 'forum';
 			title.textContent = session.title;
+
+			menuButton.type = 'button';
+			menuButton.className = 'material-symbols-rounded conversation-menu-button';
+			menuButton.dataset.menuSessionId = session.id;
+			menuButton.setAttribute('aria-label', `Open menu for ${session.title}`);
+			menuButton.setAttribute('aria-haspopup', 'menu');
+			menuButton.setAttribute(
+				'aria-expanded',
+				String(session.id === openMenuSessionId),
+			);
+			menuButton.title = 'More';
+			menuButton.textContent = 'more_horiz';
+
+			menu.className = 'conversation-menu';
+			menu.setAttribute('role', 'menu');
+			deleteButton.type = 'button';
+			deleteButton.className = 'delete-chat-button';
+			deleteButton.dataset.deleteSessionId = session.id;
+			deleteButton.setAttribute('role', 'menuitem');
+			deleteIcon.className = 'material-symbols-rounded';
+			deleteIcon.setAttribute('aria-hidden', 'true');
+			deleteIcon.textContent = 'delete';
+			deleteText.textContent = 'Delete';
+			deleteButton.append(deleteIcon, deleteText);
+			menu.appendChild(deleteButton);
+
 			button.append(icon, title);
-			conversationList.appendChild(button);
+			item.append(button, menuButton, menu);
+			conversationList.appendChild(item);
 		});
 };
 
@@ -128,8 +168,21 @@ const toApiHistory = (messages) =>
 		],
 	}));
 
-const scrollChatToBottom = () => {
-	chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: 'smooth' });
+const isChatNearBottom = () =>
+	chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <
+	BOTTOM_THRESHOLD;
+
+const updateScrollToBottomButton = () => {
+	const canScroll = chatBody.scrollHeight > chatBody.clientHeight + 16;
+	scrollToBottomButton.classList.toggle(
+		'visible',
+		canScroll && !isChatNearBottom(),
+	);
+};
+
+const scrollChatToBottom = (behavior = 'smooth') => {
+	chatBody.scrollTo({ top: chatBody.scrollHeight, behavior });
+	requestAnimationFrame(updateScrollToBottomButton);
 };
 
 const resetFileUpload = () => {
@@ -219,6 +272,26 @@ const startNewChat = () => {
 	messageInput.focus();
 };
 
+const deleteSession = (sessionId) => {
+	sessions = sessions.filter((session) => session.id !== sessionId);
+
+	if (!sessions.length) {
+		sessions = [createEmptySession()];
+	}
+
+	if (activeSessionId === sessionId) {
+		const newestSession = [...sessions].sort(
+			(a, b) => b.updatedAt - a.updatedAt,
+		)[0];
+		activeSessionId = newestSession.id;
+		renderChat();
+	}
+
+	openMenuSessionId = null;
+	saveSessions();
+	renderConversationList();
+};
+
 const getApiUrl = () => {
 	const isLocal =
 		location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -277,9 +350,15 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 					break;
 				}
 
+				const shouldStayAtBottom = isChatNearBottom();
 				botReply += JSON.parse(data);
 				renderAssistantReply(messageElement, botReply);
-				scrollChatToBottom();
+
+				if (shouldStayAtBottom) {
+					scrollChatToBottom('auto');
+				} else {
+					updateScrollToBottomButton();
+				}
 			}
 		}
 
@@ -301,7 +380,7 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 		messageElement.style.color = '#dc2626';
 	} finally {
 		resetFileUpload();
-		scrollChatToBottom();
+		updateScrollToBottomButton();
 	}
 };
 
@@ -424,10 +503,25 @@ chatForm.addEventListener('submit', handleOutgoingMessage);
 clearChatButton.addEventListener('click', resetChat);
 newChatButton?.addEventListener('click', startNewChat);
 conversationList.addEventListener('click', (e) => {
+	const menuButton = e.target.closest('[data-menu-session-id]');
+	if (menuButton) {
+		const sessionId = menuButton.dataset.menuSessionId;
+		openMenuSessionId = openMenuSessionId === sessionId ? null : sessionId;
+		renderConversationList();
+		return;
+	}
+
+	const deleteButton = e.target.closest('[data-delete-session-id]');
+	if (deleteButton) {
+		deleteSession(deleteButton.dataset.deleteSessionId);
+		return;
+	}
+
 	const button = e.target.closest('button[data-session-id]');
 	if (!button) return;
 
 	activeSessionId = button.dataset.sessionId;
+	openMenuSessionId = null;
 	resetFileUpload();
 	messageInput.value = '';
 	resetTextareaHeight();
@@ -436,6 +530,14 @@ conversationList.addEventListener('click', (e) => {
 	renderChat();
 	messageInput.focus();
 });
+document.addEventListener('click', (e) => {
+	if (openMenuSessionId && !e.target.closest('.conversation-item')) {
+		openMenuSessionId = null;
+		renderConversationList();
+	}
+});
+chatBody.addEventListener('scroll', updateScrollToBottomButton);
+scrollToBottomButton.addEventListener('click', () => scrollChatToBottom());
 document
 	.querySelector('#file-upload')
 	.addEventListener('click', () => fileInput.click());
