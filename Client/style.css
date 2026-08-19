@@ -355,6 +355,57 @@ button {
 	background: var(--panel-muted);
 }
 
+.limit-popup {
+	position: fixed;
+	inset: 0;
+	z-index: 20;
+	display: none;
+	place-items: center;
+	padding: 24px;
+	background: rgba(5, 5, 5, 0.58);
+}
+
+.limit-popup.visible {
+	display: grid;
+}
+
+.limit-popup-content {
+	width: min(360px, 100%);
+	padding: 20px;
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	background: #111419;
+	box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.limit-popup-content strong {
+	display: block;
+	color: var(--ink);
+	font-size: 1rem;
+	line-height: 1.35;
+}
+
+.limit-popup-content p {
+	margin-top: 8px;
+	color: var(--ink-muted);
+	font-size: 0.94rem;
+	line-height: 1.55;
+}
+
+.limit-popup-content button {
+	display: block;
+	width: 100%;
+	min-height: 40px;
+	margin-top: 18px;
+	color: #06120f;
+	border-radius: 8px;
+	background: var(--brand);
+}
+
+.limit-popup-content button:hover {
+	background: var(--brand-strong);
+}
+
 .chat-body .message {
 	display: flex;
 	gap: 12px;
