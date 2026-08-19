@@ -27,7 +27,49 @@ const client = new OpenAI({
 	apiKey: process.env.OPENAI_API_KEY,
 });
 
-app.post('/chat', async (req, res) => {
+const DAILY_MESSAGE_LIMIT = 5;
+const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const rateLimitStore = new Map();
+
+const getDeviceKey = (req) =>
+	req.get('x-device-id') ||
+	req.ip ||
+	req.socket.remoteAddress ||
+	'unknown-device';
+
+const getRateLimitRecord = (deviceKey) => {
+	const now = Date.now();
+	const existingRecord = rateLimitStore.get(deviceKey);
+
+	if (!existingRecord || now >= existingRecord.resetAt) {
+		const record = {
+			count: 0,
+			resetAt: now + RATE_LIMIT_WINDOW_MS,
+		};
+		rateLimitStore.set(deviceKey, record);
+		return record;
+	}
+
+	return existingRecord;
+};
+
+const rateLimitChat = (req, res, next) => {
+	const deviceKey = getDeviceKey(req);
+	const record = getRateLimitRecord(deviceKey);
+
+	if (record.count >= DAILY_MESSAGE_LIMIT) {
+		return res.status(429).json({
+			message: 'Daily chat limit reached.',
+			limit: DAILY_MESSAGE_LIMIT,
+			retryAt: new Date(record.resetAt).toISOString(),
+		});
+	}
+
+	record.count += 1;
+	next();
+};
+
+app.post('/chat', rateLimitChat, async (req, res) => {
 	try {
 		const { contents } = req.body;
 
