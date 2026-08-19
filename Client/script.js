@@ -3,7 +3,6 @@ const messageInput = document.querySelector('.message-input');
 const fileInput = document.querySelector('#file-input');
 const fileUploadWrapper = document.querySelector('.file-upload-wrapper');
 const fileCancelButton = document.querySelector('#file-cancel');
-const clearChatButton = document.querySelector('#clear-chat');
 const newChatButton = document.querySelector('#new-chat');
 const chatForm = document.querySelector('.chat-form');
 const conversationList = document.querySelector('#conversation-list');
@@ -64,32 +63,49 @@ const createEmptySession = () => ({
 const getActiveSession = () =>
 	sessions.find((session) => session.id === activeSessionId);
 
+const hasConversation = (session) =>
+	session.messages.some((message) => message.role === 'user');
+
 const saveSessions = () => {
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-	localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+	const savedSessions = sessions.filter(hasConversation);
+	const activeSession = getActiveSession();
+
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(savedSessions));
+
+	if (activeSession && hasConversation(activeSession)) {
+		localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+	} else {
+		localStorage.removeItem(ACTIVE_SESSION_KEY);
+	}
 };
 
 const loadSessions = () => {
-	try {
-		const savedSessions = JSON.parse(localStorage.getItem(STORAGE_KEY));
+	let savedSessions = [];
 
-		if (Array.isArray(savedSessions) && savedSessions.length) {
-			sessions = savedSessions.map((session) => ({
+	try {
+		const parsedSessions = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+		if (Array.isArray(parsedSessions)) {
+			savedSessions = parsedSessions.map((session) => ({
 				...createEmptySession(),
 				...session,
 				messages: Array.isArray(session.messages) ? session.messages : [],
 			}));
-		} else {
-			sessions = [createEmptySession()];
 		}
 	} catch {
-		sessions = [createEmptySession()];
+		savedSessions = [];
 	}
 
 	const savedActiveSessionId = localStorage.getItem(ACTIVE_SESSION_KEY);
-	activeSessionId =
-		sessions.find((session) => session.id === savedActiveSessionId)?.id ??
-		sessions[0].id;
+	const savedActiveSession = savedSessions.find(
+		(session) => session.id === savedActiveSessionId,
+	);
+	const draftSession = createEmptySession();
+
+	sessions = savedActiveSession
+		? savedSessions
+		: [draftSession, ...savedSessions];
+	activeSessionId = savedActiveSession?.id ?? draftSession.id;
 	saveSessions();
 };
 
@@ -104,6 +120,7 @@ const renderConversationList = () => {
 	conversationList.innerHTML = '';
 
 	[...sessions]
+		.filter(hasConversation)
 		.sort((a, b) => b.updatedAt - a.updatedAt)
 		.forEach((session) => {
 			const item = document.createElement('div');
@@ -237,24 +254,10 @@ const renderChat = () => {
 	scrollChatToBottom();
 };
 
-const resetChat = () => {
-	const activeSession = getActiveSession();
-	activeSession.messages = [];
-	activeSession.title = 'New chat';
-	activeSession.updatedAt = Date.now();
-	resetFileUpload();
-	messageInput.value = '';
-	resetTextareaHeight();
-	saveSessions();
-	renderConversationList();
-	renderChat();
-	messageInput.focus();
-};
-
 const startNewChat = () => {
 	const activeSession = getActiveSession();
 
-	if (activeSession.messages.length) {
+	if (hasConversation(activeSession)) {
 		const nextSession = createEmptySession();
 		sessions.unshift(nextSession);
 		activeSessionId = nextSession.id;
@@ -275,15 +278,19 @@ const startNewChat = () => {
 const deleteSession = (sessionId) => {
 	sessions = sessions.filter((session) => session.id !== sessionId);
 
-	if (!sessions.length) {
-		sessions = [createEmptySession()];
-	}
-
 	if (activeSessionId === sessionId) {
-		const newestSession = [...sessions].sort(
+		const newestSession = [...sessions].filter(hasConversation).sort(
 			(a, b) => b.updatedAt - a.updatedAt,
 		)[0];
-		activeSessionId = newestSession.id;
+		const draftSession = createEmptySession();
+
+		if (newestSession) {
+			activeSessionId = newestSession.id;
+		} else {
+			sessions.unshift(draftSession);
+			activeSessionId = draftSession.id;
+		}
+
 		renderChat();
 	}
 
@@ -500,7 +507,6 @@ if (window.EmojiMart) {
 }
 
 chatForm.addEventListener('submit', handleOutgoingMessage);
-clearChatButton.addEventListener('click', resetChat);
 newChatButton?.addEventListener('click', startNewChat);
 conversationList.addEventListener('click', (e) => {
 	const menuButton = e.target.closest('[data-menu-session-id]');
