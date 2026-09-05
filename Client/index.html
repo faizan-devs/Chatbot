@@ -21,8 +21,112 @@
 		<link rel="stylesheet" href="style.css" />
 	</head>
 
-	<body>
-		<main class="app-shell">
+	<body class="home-view">
+		<section class="home-screen" id="home-screen" aria-label="Alice home">
+			<div class="home-panel">
+				<div class="brand-mark" aria-hidden="true">
+					<span class="material-symbols-rounded">auto_awesome</span>
+				</div>
+				<h1>Alice</h1>
+				<p id="home-account-hint">Your private ChatGPT-style workspace.</p>
+				<button type="button" id="start-chat">Start chat</button>
+			</div>
+		</section>
+
+		<section class="auth-screen" id="auth-screen" aria-label="Account access">
+			<div class="auth-panel">
+				<div class="auth-brand">
+					<div class="brand-mark" aria-hidden="true">
+						<span class="material-symbols-rounded">auto_awesome</span>
+					</div>
+					<div>
+						<h1>Alice</h1>
+						<p>Sign in to continue chatting.</p>
+					</div>
+				</div>
+
+				<form class="auth-form active" id="login-form">
+					<h2>Log in</h2>
+					<label>
+						<span>Email</span>
+						<input type="email" name="email" autocomplete="email" required />
+					</label>
+					<label>
+						<span>Password</span>
+						<input
+							type="password"
+							name="password"
+							autocomplete="current-password"
+							required
+						/>
+					</label>
+					<p class="auth-message" data-auth-message></p>
+					<button type="submit">Log in</button>
+					<div class="auth-links">
+						<button type="button" data-auth-view="signup">Create account</button>
+						<button type="button" data-auth-view="forgot">Forgot password</button>
+					</div>
+				</form>
+
+				<form class="auth-form" id="signup-form">
+					<h2>Sign up</h2>
+					<label>
+						<span>Name</span>
+						<input type="text" name="name" autocomplete="name" required />
+					</label>
+					<label>
+						<span>Email</span>
+						<input type="email" name="email" autocomplete="email" required />
+					</label>
+					<label>
+						<span>Password</span>
+						<input
+							type="password"
+							name="password"
+							autocomplete="new-password"
+							minlength="6"
+							required
+						/>
+					</label>
+					<p class="auth-message" data-auth-message></p>
+					<button type="submit">Sign up</button>
+					<div class="auth-links">
+						<button type="button" data-auth-view="login">Already have account</button>
+					</div>
+				</form>
+
+				<form class="auth-form" id="forgot-form">
+					<h2>Reset password</h2>
+					<label>
+						<span>Email</span>
+						<input type="email" name="email" autocomplete="email" required />
+					</label>
+					<label>
+						<span>Reset token</span>
+						<input type="text" name="token" autocomplete="one-time-code" />
+					</label>
+					<label>
+						<span>New password</span>
+						<input
+							type="password"
+							name="password"
+							autocomplete="new-password"
+							minlength="6"
+						/>
+					</label>
+					<p class="auth-message" data-auth-message></p>
+					<div class="auth-actions">
+						<button type="button" id="request-reset">Send reset email</button>
+						<button type="submit">Update password</button>
+					</div>
+					<div class="auth-links">
+						<button type="button" data-auth-view="login">Back to login</button>
+					</div>
+				</form>
+			</div>
+		</section>
+
+		<main class="app-shell" id="app-shell">
 			<aside class="workspace-rail" aria-label="Chat workspace">
 				<div class="brand-lockup">
 					<div class="brand-mark" aria-hidden="true">
@@ -63,12 +167,21 @@
 					</button>
 				</nav>
 
-				<div class="system-status" aria-label="ChatGPT API status">
+				<div class="system-status" aria-label="Signed in account">
 					<span class="status-dot" aria-hidden="true"></span>
 					<div>
-						<strong>Online</strong>
-						<span>Alice</span>
+						<strong id="account-name">User</strong>
+						<span id="account-email">Signed in</span>
 					</div>
+					<button
+						type="button"
+						id="logout-button"
+						class="material-symbols-rounded"
+						aria-label="Log out"
+						title="Log out"
+					>
+						logout
+					</button>
 				</div>
 			</aside>
 
