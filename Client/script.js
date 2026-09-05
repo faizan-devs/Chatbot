@@ -1,3 +1,14 @@
+const authScreen = document.querySelector('#auth-screen');
+const homeAccountHint = document.querySelector('#home-account-hint');
+const startChatButton = document.querySelector('#start-chat');
+const authForms = document.querySelectorAll('.auth-form');
+const loginForm = document.querySelector('#login-form');
+const signupForm = document.querySelector('#signup-form');
+const forgotForm = document.querySelector('#forgot-form');
+const requestResetButton = document.querySelector('#request-reset');
+const accountName = document.querySelector('#account-name');
+const accountEmail = document.querySelector('#account-email');
+const logoutButton = document.querySelector('#logout-button');
 const chatBody = document.querySelector('.chat-body');
 const messageInput = document.querySelector('.message-input');
 const fileInput = document.querySelector('#file-input');
@@ -11,6 +22,8 @@ const limitPopup = document.querySelector('#limit-popup');
 const limitPopupMessage = document.querySelector('#limit-popup-message');
 const limitPopupClose = document.querySelector('#limit-popup-close');
 
+const AUTH_TOKEN_KEY = 'alice-auth-token';
+const AUTH_USER_KEY = 'alice-auth-user';
 const STORAGE_KEY = 'alice-chat-sessions';
 const ACTIVE_SESSION_KEY = 'alice-active-session-id';
 const BOTTOM_THRESHOLD = 80;
@@ -43,6 +56,42 @@ let activeSessionId = null;
 let openMenuSessionId = null;
 let isGenerating = false;
 let syncTimer = null;
+let currentUser = null;
+let authToken = localStorage.getItem(AUTH_TOKEN_KEY);
+
+const getApiBaseUrl = () => {
+	const isLocal =
+		location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+	return isLocal ? 'http://localhost:3000' : 'https://chatbot-u746.onrender.com';
+};
+
+const getUserStorageKey = (key) => `${key}:${currentUser?.id || 'guest'}`;
+
+const getAuthHeaders = (withJson = false) => ({
+	...(withJson ? { 'Content-Type': 'application/json' } : {}),
+	...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+});
+
+const requestJson = async (path, options = {}) => {
+	const response = await fetch(`${getApiBaseUrl()}${path}`, {
+		...options,
+		headers: {
+			...getAuthHeaders(options.body !== undefined),
+			...options.headers,
+		},
+	});
+	const contentType = response.headers.get('content-type') || '';
+	const data = contentType.includes('application/json')
+		? await response.json()
+		: {};
+
+	if (!response.ok) {
+		throw new Error(data.message || 'Something went wrong.');
+	}
+
+	return data;
+};
 
 const createMessageElement = (content, ...classes) => {
 	const div = document.createElement('div');
@@ -71,22 +120,81 @@ const getActiveSession = () =>
 	sessions.find((session) => session.id === activeSessionId);
 
 const hasConversation = (session) =>
-	session.messages.some((message) => message.role === 'user');
+	session?.messages?.some((message) => message.role === 'user');
 
-const getApiBaseUrl = () => {
-	const isLocal =
-		location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+const setAuthMessage = (form, message, isError = false) => {
+	const messageElement = form.querySelector('[data-auth-message]');
+	messageElement.textContent = message;
+	messageElement.classList.toggle('visible', Boolean(message));
+	messageElement.classList.toggle('error', isError);
+};
 
-	return isLocal ? 'http://localhost:3000' : 'https://chatbot-u746.onrender.com';
+const showAuthView = (view) => {
+	authForms.forEach((form) => {
+		form.classList.toggle('active', form.id === `${view}-form`);
+		setAuthMessage(form, '');
+	});
+};
+
+const showHome = (message = '') => {
+	document.body.classList.add('home-view');
+	document.body.classList.remove('chat-view', 'auth-required');
+	homeAccountHint.textContent =
+		message ||
+		(currentUser
+			? `Signed in as ${currentUser.name}.`
+			: 'Your private ChatGPT-style workspace.');
+};
+
+const showAuthScreen = (view = 'login', message = '') => {
+	document.body.classList.add('home-view', 'auth-required');
+	document.body.classList.remove('chat-view');
+	showAuthView(view);
+	if (message) {
+		setAuthMessage(
+			document.querySelector(`#${view}-form`),
+			message,
+			view === 'login',
+		);
+	}
+	authScreen.querySelector('input')?.focus();
+};
+
+const showChat = () => {
+	document.body.classList.add('chat-view');
+	document.body.classList.remove('home-view', 'auth-required');
+	messageInput.focus();
+};
+
+const setCurrentUser = (user, token) => {
+	currentUser = user;
+	authToken = token;
+	localStorage.setItem(AUTH_TOKEN_KEY, token);
+	localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+	accountName.textContent = user.name;
+	accountEmail.textContent = user.email;
+};
+
+const clearAuth = () => {
+	currentUser = null;
+	authToken = null;
+	localStorage.removeItem(AUTH_TOKEN_KEY);
+	localStorage.removeItem(AUTH_USER_KEY);
+	sessions = [createEmptySession()];
+	activeSessionId = sessions[0].id;
+	accountName.textContent = 'User';
+	accountEmail.textContent = 'Please log in';
+	renderConversationList();
+	renderChat();
+	showHome('You are logged out. Please log in to start chatting.');
 };
 
 const syncSessionsToServer = async (savedSessions) => {
+	if (!authToken) return;
+
 	try {
-		await fetch(`${getApiBaseUrl()}/sessions`, {
+		await requestJson('/sessions', {
 			method: 'PUT',
-			headers: {
-				'Content-Type': 'application/json',
-			},
 			body: JSON.stringify({
 				sessions: savedSessions,
 			}),
@@ -107,12 +215,15 @@ const saveSessions = ({ syncServer = true } = {}) => {
 	const savedSessions = sessions.filter(hasConversation);
 	const activeSession = getActiveSession();
 
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(savedSessions));
+	localStorage.setItem(
+		getUserStorageKey(STORAGE_KEY),
+		JSON.stringify(savedSessions),
+	);
 
 	if (activeSession && hasConversation(activeSession)) {
-		localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+		localStorage.setItem(getUserStorageKey(ACTIVE_SESSION_KEY), activeSessionId);
 	} else {
-		localStorage.removeItem(ACTIVE_SESSION_KEY);
+		localStorage.removeItem(getUserStorageKey(ACTIVE_SESSION_KEY));
 	}
 
 	if (syncServer) {
@@ -120,24 +231,30 @@ const saveSessions = ({ syncServer = true } = {}) => {
 	}
 };
 
+const normalizeSession = (session) => ({
+	...createEmptySession(),
+	...session,
+	messages: Array.isArray(session.messages) ? session.messages : [],
+});
+
 const loadSessions = () => {
 	let savedSessions = [];
 
 	try {
-		const parsedSessions = JSON.parse(localStorage.getItem(STORAGE_KEY));
+		const parsedSessions = JSON.parse(
+			localStorage.getItem(getUserStorageKey(STORAGE_KEY)),
+		);
 
 		if (Array.isArray(parsedSessions)) {
-			savedSessions = parsedSessions.map((session) => ({
-				...createEmptySession(),
-				...session,
-				messages: Array.isArray(session.messages) ? session.messages : [],
-			}));
+			savedSessions = parsedSessions.map(normalizeSession);
 		}
 	} catch {
 		savedSessions = [];
 	}
 
-	const savedActiveSessionId = localStorage.getItem(ACTIVE_SESSION_KEY);
+	const savedActiveSessionId = localStorage.getItem(
+		getUserStorageKey(ACTIVE_SESSION_KEY),
+	);
 	const savedActiveSession = savedSessions.find(
 		(session) => session.id === savedActiveSessionId,
 	);
@@ -150,25 +267,16 @@ const loadSessions = () => {
 	saveSessions({ syncServer: false });
 };
 
-const normalizeSession = (session) => ({
-	...createEmptySession(),
-	...session,
-	messages: Array.isArray(session.messages) ? session.messages : [],
-});
-
 const getConversationSnapshot = (conversationSessions) =>
 	JSON.stringify(
 		[...conversationSessions].sort((a, b) => b.updatedAt - a.updatedAt),
 	);
 
 const syncSessionsFromServer = async () => {
-	if (isGenerating) return;
+	if (isGenerating || !authToken) return;
 
 	try {
-		const response = await fetch(`${getApiBaseUrl()}/sessions`);
-		if (!response.ok) return;
-
-		const data = await response.json();
+		const data = await requestJson('/sessions');
 		if (!Array.isArray(data.sessions)) return;
 
 		const previousActiveSessionId = activeSessionId;
@@ -244,6 +352,9 @@ const renderConversationList = () => {
 			const title = document.createElement('span');
 			const menuButton = document.createElement('button');
 			const menu = document.createElement('div');
+			const renameButton = document.createElement('button');
+			const renameIcon = document.createElement('span');
+			const renameText = document.createElement('span');
 			const deleteButton = document.createElement('button');
 			const deleteIcon = document.createElement('span');
 			const deleteText = document.createElement('span');
@@ -274,6 +385,15 @@ const renderConversationList = () => {
 
 			menu.className = 'conversation-menu';
 			menu.setAttribute('role', 'menu');
+			renameButton.type = 'button';
+			renameButton.className = 'rename-chat-button';
+			renameButton.dataset.renameSessionId = session.id;
+			renameButton.setAttribute('role', 'menuitem');
+			renameIcon.className = 'material-symbols-rounded';
+			renameIcon.setAttribute('aria-hidden', 'true');
+			renameIcon.textContent = 'edit';
+			renameText.textContent = 'Rename';
+			renameButton.append(renameIcon, renameText);
 			deleteButton.type = 'button';
 			deleteButton.className = 'delete-chat-button';
 			deleteButton.dataset.deleteSessionId = session.id;
@@ -283,7 +403,7 @@ const renderConversationList = () => {
 			deleteIcon.textContent = 'delete';
 			deleteText.textContent = 'Delete';
 			deleteButton.append(deleteIcon, deleteText);
-			menu.appendChild(deleteButton);
+			menu.append(renameButton, deleteButton);
 
 			button.append(icon, title);
 			item.append(button, menuButton, menu);
@@ -332,10 +452,7 @@ const showLimitPopup = (retryAt) => {
 
 const checkServerRateLimit = async () => {
 	try {
-		const response = await fetch(`${getApiBaseUrl()}/limit-status`);
-		if (!response.ok) return true;
-
-		const data = await response.json();
+		const data = await requestJson('/limit-status');
 		const retryAt = Date.parse(data.retryAt);
 
 		if (data.remaining <= 0) {
@@ -391,7 +508,7 @@ const renderAssistantReply = (messageElement, reply) => {
 };
 
 const renderChat = () => {
-	const activeSession = getActiveSession();
+	const activeSession = getActiveSession() || createEmptySession();
 	chatBody.innerHTML = '';
 	chatBody.appendChild(createMessageElement(initialBotMessage, 'bot-message'));
 
@@ -423,7 +540,7 @@ const startNewChat = () => {
 		const nextSession = createEmptySession();
 		sessions.unshift(nextSession);
 		activeSessionId = nextSession.id;
-	} else {
+	} else if (activeSession) {
 		activeSession.title = 'New chat';
 		activeSession.updatedAt = Date.now();
 	}
@@ -461,8 +578,38 @@ const deleteSession = (sessionId) => {
 	renderConversationList();
 };
 
-const getApiUrl = () => {
-	return `${getApiBaseUrl()}/chat`;
+const renameSession = async (sessionId) => {
+	const session = sessions.find((item) => item.id === sessionId);
+	if (!session) return;
+
+	const title = prompt('Rename chat', session.title);
+	if (!title?.trim()) {
+		openMenuSessionId = null;
+		renderConversationList();
+		return;
+	}
+
+	session.title = title.trim().slice(0, 80);
+	session.updatedAt = Date.now();
+	openMenuSessionId = null;
+	saveSessions();
+	renderConversationList();
+
+	try {
+		const data = await requestJson(`/sessions/${sessionId}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ title: session.title }),
+		});
+
+		if (data.session) {
+			session.title = data.session.title;
+			session.updatedAt = data.session.updatedAt;
+			saveSessions({ syncServer: false });
+			renderConversationList();
+		}
+	} catch (error) {
+		console.warn('Could not rename chat on server.', error);
+	}
 };
 
 const generateBotResponse = async (incomingMessageDiv, sessionId) => {
@@ -470,15 +617,18 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 	const session = sessions.find((item) => item.id === sessionId);
 
 	try {
-		const response = await fetch(getApiUrl(), {
+		const response = await fetch(`${getApiBaseUrl()}/chat`, {
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-			},
+			headers: getAuthHeaders(true),
 			body: JSON.stringify({
 				contents: toApiHistory(session.messages),
 			}),
 		});
+
+		if (response.status === 401) {
+			clearAuth();
+			throw new Error('Please log in first.');
+		}
 
 		if (response.status === 429) {
 			const limitData = await response.json();
@@ -564,8 +714,7 @@ const handleOutgoingMessage = async (e) => {
 	e.preventDefault();
 
 	userData.message = messageInput.value.trim();
-	if (!userData.message) return;
-	if (isGenerating) return;
+	if (!userData.message || isGenerating || !authToken) return;
 
 	setComposerDisabled(true);
 	const canSend = await checkServerRateLimit();
@@ -627,6 +776,121 @@ const handleOutgoingMessage = async (e) => {
 		scrollChatToBottom();
 		generateBotResponse(incomingMessageDiv, activeSession.id);
 	}, 500);
+};
+
+const handleAuthSuccess = async ({ user, token }) => {
+	setCurrentUser(user, token);
+	loadSessions();
+	renderConversationList();
+	renderChat();
+	showChat();
+	await syncSessionsFromServer();
+};
+
+const handleLogin = async (e) => {
+	e.preventDefault();
+	setAuthMessage(loginForm, '');
+
+	try {
+		const formData = new FormData(loginForm);
+		await handleAuthSuccess(
+			await requestJson('/auth/login', {
+				method: 'POST',
+				body: JSON.stringify(Object.fromEntries(formData)),
+			}),
+		);
+		loginForm.reset();
+	} catch (error) {
+		setAuthMessage(loginForm, error.message, true);
+	}
+};
+
+const handleSignup = async (e) => {
+	e.preventDefault();
+	setAuthMessage(signupForm, '');
+
+	try {
+		const formData = new FormData(signupForm);
+		await handleAuthSuccess(
+			await requestJson('/auth/signup', {
+				method: 'POST',
+				body: JSON.stringify(Object.fromEntries(formData)),
+			}),
+		);
+		signupForm.reset();
+	} catch (error) {
+		setAuthMessage(signupForm, error.message, true);
+	}
+};
+
+const handleForgotRequest = async () => {
+	setAuthMessage(forgotForm, '');
+
+	try {
+		const email = new FormData(forgotForm).get('email');
+		const data = await requestJson('/auth/forgot-password', {
+			method: 'POST',
+			body: JSON.stringify({ email }),
+		});
+		const localTokenMessage = data.devResetToken
+			? ` Local reset token: ${data.devResetToken}`
+			: '';
+		setAuthMessage(forgotForm, `${data.message}${localTokenMessage}`);
+	} catch (error) {
+		setAuthMessage(forgotForm, error.message, true);
+	}
+};
+
+const handlePasswordReset = async (e) => {
+	e.preventDefault();
+	setAuthMessage(forgotForm, '');
+
+	try {
+		const formData = new FormData(forgotForm);
+		const data = await requestJson('/auth/reset-password', {
+			method: 'POST',
+			body: JSON.stringify(Object.fromEntries(formData)),
+		});
+		setAuthMessage(forgotForm, data.message);
+		forgotForm.reset();
+	} catch (error) {
+		setAuthMessage(forgotForm, error.message, true);
+	}
+};
+
+const initializeAuth = async () => {
+	if (!authToken) {
+		showHome();
+		return;
+	}
+
+	try {
+		const data = await requestJson('/me');
+		setCurrentUser(data.user, authToken);
+		showHome();
+	} catch {
+		clearAuth();
+	}
+};
+
+const handleStartChat = async () => {
+	if (!authToken) {
+		showAuthScreen('login', 'Please log in or create an account to start.');
+		return;
+	}
+
+	try {
+		const data = await requestJson('/me');
+		setCurrentUser(data.user, authToken);
+		loadSessions();
+		renderConversationList();
+		renderChat();
+		showChat();
+		await syncSessionsFromServer();
+	} catch {
+		clearAuth();
+		showAuthScreen('login', 'Session expired. Please log in again.');
+	}
 };
 
 messageInput.addEventListener('keydown', (e) => {
@@ -693,6 +957,18 @@ if (window.EmojiMart) {
 	chatForm.appendChild(picker);
 }
 
+authScreen.addEventListener('click', (e) => {
+	const button = e.target.closest('[data-auth-view]');
+	if (button) {
+		showAuthView(button.dataset.authView);
+	}
+});
+loginForm.addEventListener('submit', handleLogin);
+signupForm.addEventListener('submit', handleSignup);
+forgotForm.addEventListener('submit', handlePasswordReset);
+requestResetButton.addEventListener('click', handleForgotRequest);
+logoutButton.addEventListener('click', clearAuth);
+startChatButton.addEventListener('click', handleStartChat);
 chatForm.addEventListener('submit', handleOutgoingMessage);
 newChatButton?.addEventListener('click', startNewChat);
 conversationList.addEventListener('click', (e) => {
@@ -707,6 +983,12 @@ conversationList.addEventListener('click', (e) => {
 	const deleteButton = e.target.closest('[data-delete-session-id]');
 	if (deleteButton) {
 		deleteSession(deleteButton.dataset.deleteSessionId);
+		return;
+	}
+
+	const renameButton = e.target.closest('[data-rename-session-id]');
+	if (renameButton) {
+		renameSession(renameButton.dataset.renameSessionId);
 		return;
 	}
 
@@ -734,17 +1016,18 @@ scrollToBottomButton.addEventListener('click', () => scrollChatToBottom());
 document
 	.querySelector('#file-upload')
 	.addEventListener('click', () => fileInput.click());
-
-loadSessions();
-renderConversationList();
-renderChat();
-syncSessionsFromServer();
 window.addEventListener('focus', syncSessionsFromServer);
 window.addEventListener('storage', (e) => {
-	if (e.key === STORAGE_KEY || e.key === ACTIVE_SESSION_KEY) {
+	if (
+		currentUser &&
+		(e.key === getUserStorageKey(STORAGE_KEY) ||
+			e.key === getUserStorageKey(ACTIVE_SESSION_KEY))
+	) {
 		loadSessions();
 		renderConversationList();
 		renderChat();
 	}
 });
 setInterval(syncSessionsFromServer, 5000);
+
+initializeAuth();
