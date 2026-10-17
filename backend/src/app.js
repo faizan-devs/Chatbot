@@ -25,7 +25,25 @@ app.locals.sendPasswordResetEmail = sendPasswordResetEmail;
 
 app.use(
 	cors({
-		origin: env.allowedOrigins.length ? env.allowedOrigins : true,
+		origin(origin, callback) {
+			const allowedOrigins = [
+				'http://localhost:5500',
+				'http://127.0.0.1:5500',
+				'http://127.0.0.1:65026',
+				'http://localhost:65026',
+				'https://aliceachatbot.netlify.app/',
+			];
+
+			// Allow requests without an Origin header, such as some
+			// server-to-server or local command-line requests.
+			if (!origin || allowedOrigins.includes(origin)) {
+				return callback(null, true);
+			}
+
+			return callback(new Error('Not allowed by CORS'));
+		},
+		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+		allowedHeaders: ['Content-Type', 'Authorization'],
 	}),
 );
 
