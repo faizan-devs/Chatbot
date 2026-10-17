@@ -74,13 +74,20 @@ const getAuthHeaders = (withJson = false) => ({
 });
 
 const requestJson = async (path, options = {}) => {
-	const response = await fetch(`${getApiBaseUrl()}${path}`, {
-		...options,
-		headers: {
-			...getAuthHeaders(options.body !== undefined),
-			...options.headers,
-		},
-	});
+	let response;
+
+	try {
+		response = await fetch(`${getApiBaseUrl()}${path}`, {
+			...options,
+			headers: {
+				...getAuthHeaders(options.body !== undefined),
+				...options.headers,
+			},
+		});
+	} catch {
+		throw new Error('Cannot connect to backend. Please start the server.');
+	}
+
 	const contentType = response.headers.get('content-type') || '';
 	const data = contentType.includes('application/json')
 		? await response.json()
