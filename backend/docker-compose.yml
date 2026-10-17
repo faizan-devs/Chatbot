@@ -1,20 +1,26 @@
 services:
   postgres:
-    image: postgres:17
-    container_name: alice-postgres
+    image: postgres:16-alpine
+    container_name: chatbot-postgres
     restart: unless-stopped
-
     environment:
-      POSTGRES_USER: alice
-      POSTGRES_PASSWORD: alice_dev_password
-      POSTGRES_DB: alice_dev
-
+      POSTGRES_DB: chatbot
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot_password
     ports:
-      - '5432:5432'
-
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - chatbot_postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+  adminer:
+    image: adminer:4
+    container_name: chatbot-adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
 
 volumes:
-  postgres_data:
+  chatbot_postgres_data:
