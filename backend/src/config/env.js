@@ -5,10 +5,13 @@ const env = {
 
 	openaiApiKey: process.env.OPENAI_API_KEY,
 
-	databaseUrl: process.env.DATABASE_URL,
-	databaseSsl: process.env.DATABASE_SSL !== 'false',
+	databaseUrl:
+		process.env.DATABASE_URL ||
+		'postgresql://chatbot:chatbot_password@localhost:5432/chatbot',
+	databaseSsl: process.env.DATABASE_SSL === 'true',
 
-	authSecret: process.env.AUTH_SECRET,
+	authSecret:
+		process.env.AUTH_SECRET || 'alice-local-development-secret-change-me',
 
 	allowedOrigins:
 		process.env.ALLOWED_ORIGINS?.split(',')
