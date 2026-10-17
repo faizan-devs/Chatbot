@@ -63,7 +63,9 @@ const getApiBaseUrl = () => {
 	const isLocal =
 		location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-	return isLocal ? 'http://localhost:3000' : 'https://chatbot-u746.onrender.com';
+	return isLocal
+		? 'http://localhost:3000'
+		: 'https://chatbot-u746.onrender.com';
 };
 
 const getUserStorageKey = (key) => `${key}:${currentUser?.id || 'guest'}`;
@@ -228,7 +230,10 @@ const saveSessions = ({ syncServer = true } = {}) => {
 	);
 
 	if (activeSession && hasConversation(activeSession)) {
-		localStorage.setItem(getUserStorageKey(ACTIVE_SESSION_KEY), activeSessionId);
+		localStorage.setItem(
+			getUserStorageKey(ACTIVE_SESSION_KEY),
+			activeSessionId,
+		);
 	} else {
 		localStorage.removeItem(getUserStorageKey(ACTIVE_SESSION_KEY));
 	}
@@ -379,7 +384,8 @@ const renderConversationList = () => {
 			title.textContent = session.title;
 
 			menuButton.type = 'button';
-			menuButton.className = 'material-symbols-rounded conversation-menu-button';
+			menuButton.className =
+				'material-symbols-rounded conversation-menu-button';
 			menuButton.dataset.menuSessionId = session.id;
 			menuButton.setAttribute('aria-label', `Open menu for ${session.title}`);
 			menuButton.setAttribute('aria-haspopup', 'menu');
@@ -464,9 +470,7 @@ const checkServerRateLimit = async () => {
 
 		if (data.remaining <= 0) {
 			showLimitPopup(
-				Number.isNaN(retryAt)
-					? Date.now() + RATE_LIMIT_WINDOW_MS
-					: retryAt,
+				Number.isNaN(retryAt) ? Date.now() + RATE_LIMIT_WINDOW_MS : retryAt,
 			);
 			return false;
 		}
@@ -533,7 +537,10 @@ const renderChat = () => {
 			`${botAvatar}<div class="message-text"></div>`,
 			'bot-message',
 		);
-		renderAssistantReply(messageDiv.querySelector('.message-text'), message.text);
+		renderAssistantReply(
+			messageDiv.querySelector('.message-text'),
+			message.text,
+		);
 		chatBody.appendChild(messageDiv);
 	});
 
@@ -565,9 +572,9 @@ const deleteSession = (sessionId) => {
 	sessions = sessions.filter((session) => session.id !== sessionId);
 
 	if (activeSessionId === sessionId) {
-		const newestSession = [...sessions].filter(hasConversation).sort(
-			(a, b) => b.updatedAt - a.updatedAt,
-		)[0];
+		const newestSession = [...sessions]
+			.filter(hasConversation)
+			.sort((a, b) => b.updatedAt - a.updatedAt)[0];
 		const draftSession = createEmptySession();
 
 		if (newestSession) {
@@ -641,9 +648,7 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 			const limitData = await response.json();
 			const retryAt = Date.parse(limitData.retryAt);
 			showLimitPopup(
-				Number.isNaN(retryAt)
-					? Date.now() + RATE_LIMIT_WINDOW_MS
-					: retryAt,
+				Number.isNaN(retryAt) ? Date.now() + RATE_LIMIT_WINDOW_MS : retryAt,
 			);
 			throw new Error(limitData.message || 'Daily chat limit reached.');
 		}
@@ -703,7 +708,10 @@ const generateBotResponse = async (incomingMessageDiv, sessionId) => {
 		saveSessions();
 		renderConversationList();
 
-		if (activeSessionId === sessionId && !chatBody.contains(incomingMessageDiv)) {
+		if (
+			activeSessionId === sessionId &&
+			!chatBody.contains(incomingMessageDiv)
+		) {
 			renderChat();
 		}
 	} catch (error) {
