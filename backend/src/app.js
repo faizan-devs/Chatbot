@@ -31,7 +31,7 @@ app.use(
 				'http://127.0.0.1:5500',
 				'http://127.0.0.1:65026',
 				'http://localhost:65026',
-				'https://aliceachatbot.netlify.app/',
+				'https://aliceachatbot.netlify.app',
 			];
 
 			// Allow requests without an Origin header, such as some
