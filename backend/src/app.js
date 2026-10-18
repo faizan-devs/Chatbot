@@ -23,23 +23,43 @@ app.locals.db = {
 };
 app.locals.sendPasswordResetEmail = sendPasswordResetEmail;
 
+const allowedOrigins = [
+	'http://localhost:5500',
+	'http://127.0.0.1:5500',
+	'http://localhost:65026',
+	'http://127.0.0.1:65026',
+	'https://aliceachatbot.netlify.app',
+];
+
 app.use(
 	cors({
 		origin(origin, callback) {
-			const allowedOrigins = [
-				'http://localhost:5500',
-				'http://127.0.0.1:5500',
-				'http://127.0.0.1:65026',
-				'http://localhost:65026',
-				'https://aliceachatbot.netlify.app',
-			];
-
-			// Allow requests without an Origin header, such as some
-			// server-to-server or local command-line requests.
-			if (!origin || allowedOrigins.includes(origin)) {
+			// Allow requests without an Origin header.
+			if (!origin) {
 				return callback(null, true);
 			}
 
+			// Allow known development and production origins.
+			if (allowedOrigins.includes(origin)) {
+				return callback(null, true);
+			}
+
+			// Allow localhost and 127.0.0.1 on any port.
+			try {
+				const url = new URL(origin);
+
+				const isLocalhost =
+					url.protocol === 'http:' &&
+					(url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+
+				if (isLocalhost) {
+					return callback(null, true);
+				}
+			} catch {
+				// Invalid origin: reject it.
+			}
+
+			console.error(`Rejected CORS origin: ${origin}`);
 			return callback(new Error('Not allowed by CORS'));
 		},
 		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
